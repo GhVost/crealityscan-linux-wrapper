@@ -57,5 +57,13 @@ class PEExportTests(unittest.TestCase):
             pe_exports.read_exports(bytes(out))
 
 
+class IconTests(unittest.TestCase):
+    def test_png_writer_and_no_icon(self):
+        png = pe_exports._png(2, 1, bytes([255, 0, 0, 255, 0, 0, 255, 128]))
+        self.assertTrue(png.startswith(b'\x89PNG\r\n\x1a\n'))
+        self.assertEqual(struct.unpack('>II', png[16:24]), (2, 1))
+        self.assertIsNone(pe_exports.largest_icon_png(stub()))
+
+
 if __name__ == '__main__':
     unittest.main()

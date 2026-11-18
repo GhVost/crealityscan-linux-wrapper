@@ -118,6 +118,12 @@ def sandbox(c,log,e,*,display=None,gpu=True,network=False,devices=(),installer=F
         for name in ('hosts','resolv.conf'):
             p=Path('/etc')/name
             if p.exists():cmd+=['--ro-bind',str(p.resolve()),str(p)]
+        # Public root certificates, which Wine offers as the Windows root store, so the
+        # app can verify HTTPS (calibration data, updates). Never all of /etc/ssl:
+        # /etc/ssl/private holds host keys.
+        for name in ('ssl/certs','ca-certificates','pki/tls/certs','pki/ca-trust/extracted','ssl/cert.pem'):
+            p=Path('/etc')/name
+            if p.exists():cmd+=['--ro-bind',str(p.resolve()),str(p)]
     if gpu:
         for p in (Path('/sys'),Path('/opt/rocm')):
             if p.exists():

@@ -72,7 +72,25 @@ def desktop_quote(arg):
     return '"' + inner.replace('\\', '\\\\') + '"'
 
 
-def desktop_entry(config, folder=None):
+def app_icon(config):
+    """Extract CrealityScan's own icon from the user's installed CrealityScan.exe into
+    the data folder (no vendor artwork is stored in this repository). 'scanner' if none."""
+    import pe_exports
+    try:
+        c = load(config)
+        exe = c['prefix']/'drive_c/Program Files/CrealityScan/CrealityScan.exe'
+        png = pe_exports.largest_icon_png(exe.read_bytes())
+        if not png:
+            return 'scanner'
+        icon = data_home()/'crealityscan-linux/crealityscan.png'
+        icon.parent.mkdir(parents=True, exist_ok=True)
+        tmp = icon.with_suffix('.tmp'); tmp.write_bytes(png); tmp.replace(icon)
+        return str(icon)
+    except (OSError, ValueError, KeyError, RuntimeError):
+        return 'scanner'
+
+
+def desktop_entry(config, folder=None, icon='scanner'):
     folder = Path(folder or data_home()/'applications'); folder.mkdir(parents=True, exist_ok=True)
     path = folder/'crealityscan-linux.desktop'
     python = '/usr/bin/python3' if Path('/usr/bin/python3').exists() else sys.executable
@@ -81,7 +99,7 @@ def desktop_entry(config, folder=None):
         '[Desktop Entry]', 'Type=Application', 'Name=CrealityScan',
         'Comment=3D scanning with the Creality Pika (CrealityScan in a Linux sandbox)',
         'Exec=' + ' '.join(desktop_quote(a) for a in command),
-        'Icon=scanner', 'Terminal=false', 'StartupNotify=true', 'StartupWMClass=crealityscan.exe', 'SingleMainWindow=true',
+        'Icon=' + str(icon), 'Terminal=false', 'StartupNotify=true', 'StartupWMClass=crealityscan.exe', 'SingleMainWindow=true',
         'Categories=Graphics;3DGraphics;', 'Actions=offline;', '',
         '[Desktop Action offline]', 'Name=Open offline (no internet access)',
         'Exec=' + ' '.join(desktop_quote(a) for a in [*command, '--offline']), '']))
@@ -208,7 +226,7 @@ def helpers(c, build):
 
 
 def finish(config):
-    entry = desktop_entry(config)
+    entry = desktop_entry(config, icon=app_icon(config))
     print('Menu entry:', entry, flush=True)
     if not udev_rule_installed():
         print('\nOne step needs your password: let your user access the scanner, then replug it:\n'

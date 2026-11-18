@@ -148,3 +148,71 @@ def add_forwarders(stub, dll_name, target, exports):
     struct.pack_into('<I', data, pe.opt + 64, 0)  # CheckSum: not required for DLLs
     struct.pack_into('<II', data, pe.dirs, va, vsize)
     return bytes(data) + raw
+
+
+def _resources(data, type_id):
+    """Yield the data of every resource of one type (e.g. 3 = RT_ICON) in a PE file."""
+    pe = _PE(data)
+    if pe.ndirs < 3: return
+    root = _u32(data, pe.dirs + 16)
+    if not root: return
+    base = pe.offset(root, 16)
+
+    def entries(off):
+        count = _u16(data, off + 12) + _u16(data, off + 14)
+        if count > 4096: raise PEError('implausible resource directory')
+        for i in range(count):
+            e = off + 16 + 8 * i
+            yield _u32(data, e), _u32(data, e + 4)
+
+    def subdir(ptr):
+        if not ptr & 0x80000000: raise PEError('expected a resource subdirectory')
+        off = base + (ptr & 0x7FFFFFFF)
+        _u16(data, off + 14)  # bounds check
+        return off
+
+    for name, ptr in entries(base):
+        if name != type_id: continue
+        for _, item in entries(subdir(ptr)):
+            for _, leaf in entries(subdir(item)):
+                if leaf & 0x80000000: continue
+                rva, size = _u32(data, base + leaf), _u32(data, base + leaf + 4)
+                if size > 16 * 1024 * 1024: raise PEError('resource too large')
+                yield data[pe.offset(rva, size):pe.offset(rva, size) + size]
+
+
+def _png(width, height, rgba):
+    import zlib
+    def chunk(kind, body):
+        return struct.pack('>I', len(body)) + kind + body + struct.pack('>I', zlib.crc32(kind + body))
+    rows = b''.join(b'\0' + rgba[y * width * 4:(y + 1) * width * 4] for y in range(height))
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 6, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(rows, 9)) + chunk(b'IEND', b''))
+
+
+def largest_icon_png(data):
+    """The application's largest icon as PNG bytes, or None. Handles PNG icon entries
+    and 32-bit BGRA bitmaps (bottom-up, as Windows stores them)."""
+    best = None
+    for res in _resources(data, 3):  # RT_ICON
+        if res[:8] == b'\x89PNG\r\n\x1a\n':
+            w = struct.unpack_from('>I', res, 16)[0] if len(res) >= 24 else 0
+            cand = (w, res)
+        elif len(res) >= 40 and _u32(res, 0) == 40:
+            w, h2 = struct.unpack_from('<ii', res, 4)
+            bits = _u16(res, 14)
+            h = h2 // 2
+            if bits != 32 or not 0 < w <= 1024 or h != w or 40 + w * h * 4 > len(res): continue
+            px = res[40:40 + w * h * 4]
+            rgba = bytearray()
+            for y in range(h - 1, -1, -1):
+                row = px[y * w * 4:(y + 1) * w * 4]
+                for x in range(0, len(row), 4):
+                    b, g, r, a = row[x:x + 4]
+                    rgba += bytes((r, g, b, a))
+            cand = (w, (w, h, bytes(rgba)))
+        else:
+            continue
+        if not best or cand[0] > best[0]: best = cand
+    if not best: return None
+    return best[1] if isinstance(best[1], bytes) else _png(*best[1])
