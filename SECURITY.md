@@ -51,26 +51,29 @@ The display is chosen by `display` in the local config:
 There is no automatic fallback between modes; a missing display or
 xwayland-satellite fails the launch.
 
-USB and diagnostics use a private network namespace, also separating abstract
-Unix sockets. Wi-Fi is refused by default. Enabling `allow_host_network: true`
-in the trusted local config is an explicit opt-in to a weaker boundary.
-**Wi-Fi shares the host network**, including access to
+Diagnostics, smoke tests and installation use a private network namespace, also
+separating abstract Unix sockets. USB sessions do too when `allow_host_network`
+is false or with `launch --offline`. `allow_host_network` is **true in the
+default config** so calibration and firmware checks work; it is a deliberately
+weaker boundary than the original project's offline default.
+**Network sessions share the host network**, including access to
 host network services and abstract Unix sockets, including the abstract
 sockets of X servers. In isolated display mode, the desktop X server's cookie is
 still withheld, but permissive host X-server access rules would let the app reach
-it in Wi-Fi mode. Do not treat Wi-Fi mode as equivalent to USB security
-isolation. A separate network broker would require additional implementation and
+it in a network session. Do not treat a network session as equivalent to an
+offline one. A separate network broker would require additional implementation and
 scanner validation. Nothing here authenticates the vendor SDK's Wi-Fi protocol.
 
 ### Wi-Fi and online mode
 
-`launch --online` (the menu entry's **Open online** action) is USB mode with the
+With `allow_host_network: true` (the default config), USB sessions run online:
 same host network as Wi-Fi mode, for calibration-board downloads and firmware
-updates. It needs the same `allow_host_network: true` opt-in and has the same
-weaker network boundary; filesystem, device and display isolation are unchanged.
-The app then also reaches Creality's analytics, crash-report and update servers.
-Firmware updates change the scanner itself and are untested with this project.
-The default menu entry stays offline.
+updates; filesystem, device and display isolation are unchanged. The app then
+also reaches Creality's analytics, crash-report and update servers. Firmware
+updates change the scanner itself and are untested with this project. For an
+isolated session use the menu's **Open offline** action (`launch --offline`), or
+set `allow_host_network: false` to make every session offline. Configs created
+before this default keep their own value.
 
 ## Integrity
 

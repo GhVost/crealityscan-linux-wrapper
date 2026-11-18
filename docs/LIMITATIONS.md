@@ -22,8 +22,8 @@ kernel. Treat any new version as unverified until a scan has been exported.
 each stream start, with no visible effect so far; the app's performance test
 refuses to run on battery (`OB_SCAN_ERROR_NO_PLUG_IN_POWER`, as on Windows);
 calibration needs Creality's server for board data, which the default USB
-sandbox blocks (scanning with the factory calibration works); `launch --online`
-allows it but calibration through it has not been tested yet. Switching the scanner
+sandbox blocks (scanning with the factory calibration works). USB sessions are now
+online by default, which allows it, but calibration that way has not been tested yet. Switching the scanner
 off during a session makes the app crash or stop with a USB "No such device"
 error and the launcher exit with code 3; switch it on and relaunch. The notes
 below describe the 4.3.2 results.

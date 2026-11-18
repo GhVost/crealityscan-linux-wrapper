@@ -193,14 +193,15 @@ NOT CONFIRMED if the window opens without focus; click the window and rerun.
 ## Launch and normal use
 
 ```sh
-python3 scripts/creality.py launch --mode usb
-python3 scripts/creality.py launch --mode usb --online   # calibration, firmware updates
+python3 scripts/creality.py launch --mode usb             # online when allowed
+python3 scripts/creality.py launch --mode usb --offline   # no network this session
 python3 scripts/creality.py launch --mode wifi
 ```
 
-`--online` and Wi-Fi need `"allow_host_network": true` in the config; see
-SECURITY.md. Calibration downloads the calibration board's data from Creality, so
-it fails offline; scanning itself works offline.
+`"allow_host_network": true` (the default) lets USB sessions go online and enables
+Wi-Fi mode; `false` keeps every session offline. See SECURITY.md. Calibration
+downloads the calibration board's data from Creality, so it fails offline;
+scanning itself works offline.
 
 Use one command at a time. USB mode discovers the actual Pika endpoints and
 serial, verifies access/ownership, and starts private helper processes. Its

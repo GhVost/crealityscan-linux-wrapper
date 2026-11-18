@@ -110,13 +110,16 @@ def already_running(c):
     except OSError:return True
     return False
 
-def launch(c,mode,smoke=False,online=False):
+def launch(c,mode,smoke=False,online=None):
     def running():
         # A second click in the menu must not start a second app on the same scanner.
         print('CrealityScan is already running; not starting another one.',flush=True)
         notify('CrealityScan is already running. Switch to its window (it may be behind others).',
                title='CrealityScan is already open')
     if already_running(c):return running()
+    # With host network allowed (the default), USB sessions are online so calibration
+    # downloads and firmware updates work; --offline keeps a session isolated.
+    if online is None:online=mode=='usb' and c.get('allow_host_network',False)
     if (mode=='wifi' or online) and not c.get('allow_host_network',False):
         raise RuntimeError(('Wi-Fi' if mode=='wifi' else 'Online mode (calibration downloads, updates)')+
                            ' needs allow_host_network=true in '+str(c.get('config_path','the config'))+
@@ -155,7 +158,9 @@ def main():
     for cmd in ('doctor','install','diagnose','smoke'):sub.add_parser(cmd)
     p=sub.add_parser('build');p.add_argument('--portable',action='store_true',help='link libyuv statically (release builds)')
     p=sub.add_parser('launch');p.add_argument('--mode',choices=('usb','wifi'),default='usb')
-    p.add_argument('--online',action='store_true',help='also allow internet access (calibration-board data, firmware); needs allow_host_network')
+    net=p.add_mutually_exclusive_group()
+    net.add_argument('--online',dest='online',action='store_true',default=None,help='allow internet access (calibration-board data, firmware); default when allow_host_network is true')
+    net.add_argument('--offline',dest='online',action='store_false',help='no network access for this session')
     args=ap.parse_args()
     if args.command=='survey':
         import survey;print(survey.report());return

@@ -17,7 +17,8 @@ which wrote the USB camera bridge, sandbox and OpenCL fixes. This fork adds:
 - **Any GPU with Vulkan and OpenCL**, detected automatically: AMD, NVIDIA (including
   hybrid laptops) and Intel.
 - **A self-installing package** (`.run`) that works offline, with an uninstaller.
-- **Online mode** for calibration-board data and firmware updates (opt-in).
+- **Internet access** for calibration-board data and firmware updates (on by default;
+  an offline launch is one click away).
 
 ## Install
 
@@ -112,26 +113,19 @@ If it works (or doesn't), please file a
 - **Problems:** you'll usually get a desktop notification. Logs are in
   `~/.local/share/crealityscan-linux/data/logs`.
 
-### Online mode (calibration, firmware updates)
+### Internet access (calibration, firmware updates)
 
-By default the app has **no internet access**. Calibration needs to download your
-calibration board's data from Creality, and firmware updates need the internet too.
-To allow it:
+The app is **online by default**, so calibration can download your calibration
+board's data from Creality and the app can check for firmware updates. With
+network access the app shares your computer's network and can reach local
+services; the rest of the sandbox (files, devices, display) stays in place. See
+the *Wi-Fi and online mode* section of [SECURITY.md](SECURITY.md).
 
-1. Read the *Wi-Fi and online mode* section of [SECURITY.md](SECURITY.md): with
-   network access the app shares your computer's network and can reach local
-   services. The rest of the sandbox stays in place.
-2. Set `"allow_host_network": true` in
-   `~/.local/share/crealityscan-linux/app/config.local.json`.
-3. Right-click **CrealityScan** in your app menu and choose **Open online
-   (calibration, firmware updates)**, or run:
-   ```sh
-   python3 ~/.local/share/crealityscan-linux/app/scripts/creality.py \
-     --config ~/.local/share/crealityscan-linux/app/config.local.json launch --online
-   ```
-
-Use online mode only when you need it; the normal menu entry stays offline.
-Scanning works offline with the scanner's factory calibration.
+- **One offline session:** right-click **CrealityScan** in your app menu and choose
+  **Open offline (no internet access)**.
+- **Always offline:** set `"allow_host_network": false` in
+  `~/.local/share/crealityscan-linux/app/config.local.json`. Scanning works
+  offline with the scanner's factory calibration; calibration then fails.
 
 ## Scanners
 

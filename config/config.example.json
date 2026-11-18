@@ -9,7 +9,7 @@
   "environment": {},
   "blue_laser_fix": true,
   "device_memory_fix": true,
-  "allow_host_network": false,
+  "allow_host_network": true,
   "scanner_serial": null,
   "scanner_lock_root": null,
   "allow_untested_version": false
