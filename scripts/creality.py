@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """CrealityScan on Linux: setup and launcher, confined to an owned prefix."""
-import argparse,datetime,json,os,shutil,subprocess,sys
+import argparse,datetime,json,os,shutil,subprocess,sys,time
 from contextlib import nullcontext
 from integrity import installation_path, save_installation, verify_installation
 import stateio
@@ -110,6 +110,23 @@ def already_running(c):
     except OSError:return True
     return False
 
+def start_broker(c,log,serial):
+    """Host-side device broker (scripts/pika_broker.py): lets the sandboxed helpers
+    reopen the scanner after it re-enumerates, e.g. when calibration reboots it."""
+    sock=c['data_dir']/'.pika-broker.sock'  # data_dir is mounted into the sandbox at the same path
+    if len(str(sock).encode())>=100:
+        print('Note: data_dir path too long for the device broker; the scanner cannot be reopened after it reboots (calibration).',flush=True)
+        return None,None
+    out=stateio.open_file(log/'broker.log','xb')
+    p=subprocess.Popen([sys.executable,'-I',str(ROOT/'scripts/pika_broker.py'),str(sock),serial],
+                       stdout=out,stderr=subprocess.STDOUT,stdin=subprocess.DEVNULL)
+    out.close()
+    for _ in range(50):
+        if 'READY' in stateio.read_text(log/'broker.log'):return p,str(sock)
+        if p.poll() is not None:break
+        time.sleep(.1)
+    p.kill();raise RuntimeError('Device broker did not start; see '+str(log/'broker.log'))
+
 def launch(c,mode,smoke=False,online=None):
     def running():
         # A second click in the menu must not start a second app on the same scanner.
@@ -132,13 +149,21 @@ def launch(c,mode,smoke=False,online=None):
         notify('Starting CrealityScan. This takes about a minute; its window will appear by itself.',
                title='CrealityScan is starting')
     verify_install(c);log=logdir(c,'smoke'if smoke else mode);prepare_exports(c)
-    e={};nodes=[];scanner_lock=None
+    e={};nodes=[];scanner_lock=None;broker=None
     if mode=='usb' and not smoke:
         from usb import prepare
         e,nodes,scanner_lock=prepare(c)
+        broker,sock=start_broker(c,log,e['PIKA_USB_SERIAL'])
+        if sock:e['PIKA_BROKER']=sock
     if smoke:e['DXVK_HUD']='devinfo'
-    code=wine(c,log,[winpath(appdir(c)/'CrealityScan.exe'),'-logFile',winpath(log/'Player.log')],
-              extra=e,devices=nodes,network=(mode=='wifi' or online) and not smoke,seconds=35 if smoke else 0,workdir=appdir(c),exports=True)
+    try:
+        code=wine(c,log,[winpath(appdir(c)/'CrealityScan.exe'),'-logFile',winpath(log/'Player.log')],
+                  extra=e,devices=nodes,network=(mode=='wifi' or online) and not smoke,seconds=35 if smoke else 0,workdir=appdir(c),exports=True)
+    finally:
+        if broker:
+            broker.terminate()
+            try:broker.wait(5)
+            except subprocess.TimeoutExpired:broker.kill()
     if smoke:
         player=stateio.read_text(log/'Player.log')if (log/'Player.log').exists()else ''
         success=code in (0,124) and any(s in player for s in ('HomeState','HomePanel')) and 'Direct3D' in player

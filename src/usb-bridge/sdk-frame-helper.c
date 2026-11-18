@@ -26,6 +26,7 @@
 #include <sys/wait.h>
 #include <netinet/tcp.h>
 #include <sys/file.h>
+#include <sys/un.h>
 #define BYTES (1280 * 960)
 struct metadata_capture { int fd,streaming; void *maps[4]; size_t lengths[4]; unsigned count; uint32_t pending_sequence; unsigned pending_length; unsigned char pending[256]; };
 struct capture {
@@ -104,9 +105,40 @@ static int pika_node(const char *node) {
     *slash = 0;
   }
 }
-static int metadata_open(struct metadata_capture *m,const char *node) {
-  if(!node||!pika_node(node))return -1;
-  m->fd=open(node,O_RDWR|O_NONBLOCK|O_CLOEXEC|O_NOFOLLOW);if(m->fd<0)return -1;
+/* With PIKA_BROKER set, descriptors come from the host-side broker
+ * (scripts/pika_broker.py), which finds the scanner again by serial after it
+ * re-enumerates (calibration mode reboots it). The broker verifies identity. */
+static int broker_open(const char *key) {
+  const char *path = getenv("PIKA_BROKER");
+  struct sockaddr_un a = {.sun_family = AF_UNIX};
+  if (!path || strlen(path) >= sizeof(a.sun_path)) { errno = ENOENT; return -1; }
+  strcpy(a.sun_path, path);
+  int s = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  if (s < 0) return -1;
+  struct timeval t = {.tv_sec = 4};
+  setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof(t));
+  char req[8], reply[64] = {0};
+  int n = snprintf(req, sizeof(req), "%s\n", key);
+  union { struct cmsghdr h; char buf[CMSG_SPACE(sizeof(int))]; } control;
+  struct iovec iov = {.iov_base = reply, .iov_len = sizeof(reply) - 1};
+  struct msghdr msg = {.msg_iov = &iov, .msg_iovlen = 1, .msg_control = control.buf, .msg_controllen = sizeof(control.buf)};
+  int fd = -1;
+  if (!connect(s, (void *)&a, sizeof(a)) && send(s, req, n, MSG_NOSIGNAL) == n && recvmsg(s, &msg, MSG_CMSG_CLOEXEC) > 0) {
+    struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
+    if (c && c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS) memcpy(&fd, CMSG_DATA(c), sizeof(int));
+    if (strncmp(reply, "OK", 2)) { if (fd >= 0) close(fd); fd = -1; errno = strncmp(reply, "ERR ", 4) ? EIO : atoi(reply + 4); }
+  }
+  int saved = errno; close(s); errno = saved;
+  if (fd >= 0) fprintf(stderr, "OPEN %s via device broker\n", key);
+  return fd;
+}
+static int node_open(const char *node, const char *key) {
+  if (getenv("PIKA_BROKER")) return broker_open(key);
+  if (!node || !pika_node(node)) { fprintf(stderr, "Refused non-Pika or unverified node\n"); errno = EACCES; return -1; }
+  return open(node, O_RDWR | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
+}
+static int metadata_open(struct metadata_capture *m,const char *node,const char *key) {
+  m->fd=node_open(node,key);if(m->fd<0)return -1;
   struct v4l2_format fmt={.type=V4L2_BUF_TYPE_META_CAPTURE};
   if(xioctl(m->fd,VIDIOC_G_FMT,&fmt)||fmt.fmt.meta.dataformat!=V4L2_META_FMT_UVC)return -1;
   struct v4l2_requestbuffers req={.count=4,.type=V4L2_BUF_TYPE_META_CAPTURE,.memory=V4L2_MEMORY_MMAP};
@@ -180,16 +212,12 @@ static void capture_close(struct capture *c) {
   close(c->fd);
   c->fd = -1;
 }
-static int capture_open(struct capture *c, const char *node, const char *metanode, uint32_t fourcc, unsigned fps) {
+static int capture_open(struct capture *c, const char *node, const char *metanode, unsigned endpoint, uint32_t fourcc, unsigned fps) {
   memset(c, 0, sizeof(*c));
   c->fd = -1;c->meta.fd=-1;
-  if (!pika_node(node)) {
-    fprintf(stderr, "Refused non-Pika or unverified node\n");
-    return -1;
-  }
-  c->fd = open(node, O_RDWR | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
+  c->fd = node_open(node, endpoint ? "2:0" : "0:0");
   if (c->fd < 0) { perror("open video device"); return -1; }
-  fprintf(stderr, "OPEN %s verified Pika 2bc5:0c0b\n", node);
+  if (!getenv("PIKA_BROKER")) fprintf(stderr, "OPEN %s verified Pika 2bc5:0c0b\n", node);
   struct v4l2_capability cap = {0};
   if (xioctl(c->fd, VIDIOC_QUERYCAP, &cap) < 0)
     return -1;
@@ -247,7 +275,7 @@ static int capture_open(struct capture *c, const char *node, const char *metanod
     if (c->maps[i] == MAP_FAILED || xioctl(c->fd, VIDIOC_QBUF, &b) < 0)
       return -1;
   }
-  if(metadata_open(&c->meta,metanode))return -1;
+  if(metadata_open(&c->meta,metanode,endpoint?"2:1":"0:1"))return -1;
   enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   if (xioctl(c->fd, VIDIOC_STREAMON, &type) < 0)
     return -1;
@@ -311,7 +339,7 @@ static void client(int sock, const char **nodes) {
   int convert_rgb=req[1]&&req[2]==V4L2_PIX_FMT_BGR24;
   int convert_color=convert_nv12||convert_rgb;
   struct capture c = {.fd = -1};
-  if (capture_open(&c, nodes[req[1]], getenv(req[1]?"PIKA_METADATA_1":"PIKA_METADATA_0"), convert_color?V4L2_PIX_FMT_MJPEG:req[2], req[3])) status = errno ? errno : EIO;
+  if (capture_open(&c, nodes[req[1]], getenv(req[1]?"PIKA_METADATA_1":"PIKA_METADATA_0"), req[1], convert_color?V4L2_PIX_FMT_MJPEG:req[2], req[3])) status = errno ? errno : EIO;
   if (!all(sock, &status, 4, 1) && !status) {
     unsigned char *pixels = malloc(BYTES * 3);
     unsigned char *converted = convert_color?malloc(BYTES*3):NULL;

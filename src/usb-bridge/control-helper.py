@@ -48,6 +48,33 @@ for index, node in enumerate(nodes):
     fd = os.open(node, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW)
     state.append({'fd':fd,'saved':{}})
 
+# The scanner reboots (re-enumerates) when it enters calibration mode. The host-side
+# broker (scripts/pika_broker.py) finds the same scanner again by serial and passes a
+# fresh descriptor; without a broker a vanished device stays an error.
+BROKER = os.environ.get('PIKA_BROKER')
+ENDPOINT_KEYS = ('0:0', '2:0')
+
+def reopen(ep):
+    import socket
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM | socket.SOCK_CLOEXEC) as s:
+        s.settimeout(3.5); s.connect(BROKER); s.sendall(ENDPOINT_KEYS[ep].encode() + b'\n')
+        msg, fds, _, _ = socket.recv_fds(s, 64, 1)
+    if not (msg.startswith(b'OK') and fds):
+        for fd in fds: os.close(fd)
+        raise OSError(errno.ENODEV, 'scanner did not come back: ' + msg.decode(errors='replace').strip())
+    try: os.close(state[ep]['fd'])
+    except OSError: pass
+    state[ep]['fd'] = fds[0]
+    print(json.dumps({'reconnected':ep}),flush=True)
+
+def with_device(ep, action):
+    """Run action(fd); if the scanner vanished, reopen it once through the broker."""
+    try: return action(state[ep]['fd'])
+    except OSError as e:
+        if e.errno not in (errno.ENODEV, errno.ENOENT, errno.EIO) or not BROKER: raise
+        reopen(ep)
+        return action(state[ep]['fd'])
+
 def xu(fd, selector, query, length, payload=b''):
     if selector not in (1,2,3) or not 1 <= length <= 1024: raise OSError(errno.EINVAL,'XU bounds')
     data = C.create_string_buffer(length)
@@ -85,25 +112,25 @@ class Handler(socketserver.BaseRequestHandler):
             out=b''; error=0
             try:
                 with locks[ep]:
-                    fd=state[ep]['fd']
-                    if op in (1,2,3):
-                        length=int.from_bytes(xu(fd,selector,0x85,2),'little')
-                        if not 0<length<=1024: raise OSError(errno.EOVERFLOW,'XU length')
-                        if op==1: out=struct.pack('<I',length)
-                        elif op==2: out=xu(fd,selector,0x81,length)
-                        else:
+                    def run(fd):
+                        if op in (1,2,3):
+                            length=int.from_bytes(xu(fd,selector,0x85,2),'little')
+                            if not 0<length<=1024: raise OSError(errno.EOVERFLOW,'XU length')
+                            if op==1: return struct.pack('<I',length)
+                            if op==2: return xu(fd,selector,0x81,length)
                             if n != length: raise OSError(errno.EINVAL,'XU length mismatch')
                             # Unmodified SDK commands only; no firmware/update API is invoked by our probe.
-                            xu(fd,selector,1,length,payload)
-                    elif op==10:
-                        b=bytearray(68); struct.pack_into('<I',b,0,selector)
-                        fcntl.ioctl(fd,QUERYCTRL,b,True); out=bytes(b)
-                    elif op==11: out=struct.pack('<i',ctrl_get(fd,selector))
-                    elif op==12:
-                        if selector not in allowed_controls or n!=4: raise OSError(errno.EINVAL,'control bounds')
-                        if selector not in state[ep]['saved']: state[ep]['saved'][selector]=ctrl_get(fd,selector)
-                        ctrl_set(fd,selector,struct.unpack('<i',payload)[0])
-                    else: raise OSError(errno.ENOTSUP,'operation')
+                            xu(fd,selector,1,length,payload); return b''
+                        if op==10:
+                            b=bytearray(68); struct.pack_into('<I',b,0,selector)
+                            fcntl.ioctl(fd,QUERYCTRL,b,True); return bytes(b)
+                        if op==11: return struct.pack('<i',ctrl_get(fd,selector))
+                        if op==12:
+                            if selector not in allowed_controls or n!=4: raise OSError(errno.EINVAL,'control bounds')
+                            if selector not in state[ep]['saved']: state[ep]['saved'][selector]=ctrl_get(fd,selector)
+                            ctrl_set(fd,selector,struct.unpack('<i',payload)[0]); return b''
+                        raise OSError(errno.ENOTSUP,'operation')
+                    out=with_device(ep,run)
             except OSError as e: error=e.errno
             print(json.dumps({'op':op,'endpoint':ep,'selector':selector,'request_length':n,
                               'request_header':payload[:24].hex() if op==3 else None,
