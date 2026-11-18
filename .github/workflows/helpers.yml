@@ -119,6 +119,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists (uploaded by a maintainer); not replacing it."; exit 0
+          fi
           run=$(ls dist/*.run)
           cat > notes.md <<EOF
           Self-installing CrealityScan Linux Wrapper. Download the \`.run\` file and follow the [Install steps in the README](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}#install):
