@@ -102,12 +102,29 @@ def prepare_exports(c):
     if moved:print('Moved into it from the prefix:',', '.join(moved),flush=True)
     for folder in kept:print('Note: left in the prefix (name already used, other disk or unexpected link):',folder,flush=True)
 
+def already_running(c):
+    """True while another CrealityScan session runs (this install's session lock, or any
+    CrealityScan.exe from another checkout)."""
+    if subprocess.run(['pgrep','-x','CrealityScan.ex'],capture_output=True).returncode==0:return True
+    try:owned(c).close()
+    except OSError:return True
+    return False
+
 def launch(c,mode,smoke=False,online=False):
+    def running():
+        # A second click in the menu must not start a second app on the same scanner.
+        print('CrealityScan is already running; not starting another one.',flush=True)
+        notify('CrealityScan is already running. Switch to its window (it may be behind others).',
+               title='CrealityScan is already open')
+    if already_running(c):return running()
     if (mode=='wifi' or online) and not c.get('allow_host_network',False):
         raise RuntimeError(('Wi-Fi' if mode=='wifi' else 'Online mode (calibration downloads, updates)')+
                            ' needs allow_host_network=true in '+str(c.get('config_path','the config'))+
                            '; read the weaker isolation boundary in SECURITY.md')
-    dependencies(c);lock=owned(c);verify_install(c);log=logdir(c,'smoke'if smoke else mode);prepare_exports(c)
+    dependencies(c)
+    try:lock=owned(c)
+    except BlockingIOError:return running()
+    verify_install(c);log=logdir(c,'smoke'if smoke else mode);prepare_exports(c)
     e={};nodes=[];scanner_lock=None
     if mode=='usb' and not smoke:
         from usb import prepare
@@ -169,10 +186,10 @@ def main():
     elif args.command=='smoke':launch(c,'usb',smoke=True)
     elif args.command=='launch':launch(c,args.mode,online=args.online)
 
-def notify(message):
-    # Menu launches have no terminal; show failures on the desktop instead.
+def notify(message,title='CrealityScan could not start'):
+    # Menu launches have no terminal; show messages on the desktop instead.
     if not sys.stderr.isatty() and shutil.which('notify-send'):
-        subprocess.run(['notify-send','--app-name=CrealityScan','--icon=scanner','CrealityScan could not start',message],check=False)
+        subprocess.run(['notify-send','--app-name=CrealityScan','--icon=scanner',title,message],check=False)
 
 if __name__=='__main__':
     try:main()

@@ -81,7 +81,7 @@ def desktop_entry(config, folder=None):
         '[Desktop Entry]', 'Type=Application', 'Name=CrealityScan',
         'Comment=3D scanning with the Creality Pika (CrealityScan in a Linux sandbox)',
         'Exec=' + ' '.join(desktop_quote(a) for a in command),
-        'Icon=scanner', 'Terminal=false', 'StartupNotify=true', 'StartupWMClass=crealityscan.exe',
+        'Icon=scanner', 'Terminal=false', 'StartupNotify=true', 'StartupWMClass=crealityscan.exe', 'SingleMainWindow=true',
         'Categories=Graphics;3DGraphics;', 'Actions=online;', '',
         '[Desktop Action online]', 'Name=Open online (calibration, firmware updates)',
         'Exec=' + ' '.join(desktop_quote(a) for a in [*command, '--online']), '']))
