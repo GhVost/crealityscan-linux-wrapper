@@ -24,3 +24,4 @@ __pycache__/
 *.core
 /tools/pika-recorder/capture
 /.local-trust/
+/dist/

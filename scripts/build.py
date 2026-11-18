@@ -2,7 +2,7 @@ import json,os,subprocess,tempfile
 from pathlib import Path
 from common import ROOT,dependencies,digest
 
-NAMES=['pikacam.dll','mf.dll','sdk-proxy.dll','usb-opencl.so','dgg-device-memory.so','v4l2-helper','sdk-frame-helper','bridge-probe.exe','real-frame-probe.exe','sdk-connect-probe.exe','control-probe.exe','opencl-probe.exe','graphics-probe.exe']
+NAMES=['pikacam.dll','mf.dll','sdk-proxy-stub.dll','usb-opencl.so','dgg-device-memory.so','v4l2-helper','sdk-frame-helper','bridge-probe.exe','real-frame-probe.exe','sdk-connect-probe.exe','control-probe.exe','opencl-probe.exe','graphics-probe.exe']
 # Release builds link libyuv/libjpeg statically: distributions name libyuv differently.
 PORTABLE_YUV=['-Wl,-Bstatic','-lyuv','-ljpeg','-Wl,-Bdynamic','-lstdc++','-lm']
 
@@ -17,8 +17,10 @@ def build(c,portable=False):
         libs=[runner/'lib/wine/x86_64-windows'/('lib'+n+'.a')for n in ('kernel32','ucrtbase','mfplat','mfuuid','uuid','ole32','ws2_32','strmiids','setupapi','cfgmgr32','hid')]
         for name in ('bridge','probe','real-frame-probe','sdk-connect-probe','control-probe','sdk-proxy'):
             run(['clang',*flags,'-c',src/(name+'.c'),'-o',tmp/(name+'.obj')])
-        for dll,obj,definition in [('pikacam','bridge','pikacam'),('mf','bridge','mf-proxy'),('sdk-proxy','sdk-proxy','sdk-proxy')]:
-            run(['lld-link','/dll','/entry:DllMain' if dll=='sdk-proxy' else '/noentry','/nodefaultlib','/def:'+str(src/(definition+'.def')),'/out:'+str(tmp/(dll+'.dll')),tmp/(obj+'.obj'),*libs])
+        for dll,obj,definition in [('pikacam','bridge','pikacam'),('mf','bridge','mf-proxy')]:
+            run(['lld-link','/dll','/noentry','/nodefaultlib','/def:'+str(src/(definition+'.def')),'/out:'+str(tmp/(dll+'.dll')),tmp/(obj+'.obj'),*libs])
+        # No exports: setup copies the installed SDK's export table into it (scripts/pe_exports.py).
+        run(['lld-link','/dll','/entry:DllMain','/nodefaultlib','/out:'+str(tmp/'sdk-proxy-stub.dll'),tmp/'sdk-proxy.obj',*libs])
         for obj,name in [('probe','bridge-probe'),('real-frame-probe','real-frame-probe'),('sdk-connect-probe','sdk-connect-probe'),('control-probe','control-probe')]:
             run(['lld-link','/subsystem:console','/entry:mainCRTStartup','/nodefaultlib','/out:'+str(tmp/(name+'.exe')),tmp/(obj+'.obj'),*libs,runner/'lib/wine/x86_64-windows/libmfreadwrite.a'])
         for name in ('v4l2-helper','sdk-frame-helper'):

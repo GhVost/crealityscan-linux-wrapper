@@ -1,11 +1,12 @@
 """One-command setup for new users: fetch, configure, install, check, add a menu entry."""
 import datetime
 import json
+import re
 import os
 from pathlib import Path
 import subprocess
 import sys
-from common import LOCK, ROOT, digest, load, owned
+from common import LOCK, ROOT, digest, load, owned, tested
 from exports import default_dir
 import fetch
 import gpuinfo
@@ -25,18 +26,31 @@ def downloads_dir():
     return Path(out) if out and Path(out).is_absolute() else Path.home()/'Downloads'
 
 
-def find_installer():
-    """The pinned CrealityScan installer in Downloads or home, matched by checksum."""
-    for folder in (downloads_dir(), Path.home()):
+def installer_version(path):
+    """Version from a CrealityScan_win_<version>.exe name, as a sortable tuple (or None)."""
+    m = re.search(r'crealityscan[_ -]win[_ -]v?(\d+(?:\.\d+)*)', Path(path).name, re.I)
+    return tuple(int(x) for x in m[1].split('.')) if m else None
+
+
+def find_installer(allow_untested=False):
+    """The newest tested CrealityScan installer in Downloads or home (matched by checksum);
+    with allow_untested, the newest installer by version in its file name."""
+    found = []
+    # xdg-user-dir answers $HOME when no Downloads folder is configured.
+    for folder in dict.fromkeys((downloads_dir(), Path.home()/'Downloads', Path.home())):
         try:
-            candidates = sorted(p for p in folder.iterdir() if p.suffix.lower() == '.exe'
-                                and 'crealityscan' in p.name.lower() and p.is_file())
+            found += [p for p in folder.iterdir() if p.suffix.lower() == '.exe'
+                      and 'crealityscan' in p.name.lower() and p.is_file()]
         except OSError:
             continue
-        for p in candidates:
-            if digest(p) == LOCK['installer_sha256']:
-                return p
-    return None
+    order = {r['installer_sha256']: i for i, r in enumerate(LOCK['crealityscan_tested'])}
+    known = sorted(((order[h], p) for p in sorted(found) if (h := digest(p)) in order), key=lambda x: x[0])
+    if known and not allow_untested:
+        return known[0][1]
+    versioned = sorted((v, p) for p in found if (v := installer_version(p)))
+    if allow_untested and versioned:
+        return versioned[-1][1]
+    return known[0][1] if known else None
 
 
 def detect_gpu():
@@ -65,10 +79,12 @@ def desktop_entry(config, folder=None):
     command = [python, ROOT/'scripts/creality.py', '--config', Path(config).resolve(), 'launch', '--mode', 'usb']
     path.write_text('\n'.join([
         '[Desktop Entry]', 'Type=Application', 'Name=CrealityScan',
-        'Comment=CrealityScan 4.3.2 for the Creality Pika (Linux compatibility launcher)',
+        'Comment=3D scanning with the Creality Pika (CrealityScan in a Linux sandbox)',
         'Exec=' + ' '.join(desktop_quote(a) for a in command),
         'Icon=scanner', 'Terminal=false', 'StartupNotify=true', 'StartupWMClass=crealityscan.exe',
-        'Categories=Graphics;3DGraphics;', '']))
+        'Categories=Graphics;3DGraphics;', 'Actions=online;', '',
+        '[Desktop Action online]', 'Name=Open online (calibration, firmware updates)',
+        'Exec=' + ' '.join(desktop_quote(a) for a in [*command, '--online']), '']))
     return path
 
 
@@ -94,13 +110,13 @@ def other_gpu_present(drm=Path('/sys/class/drm')):
     return False
 
 
-def write_config(path, gpu_name, installer):
+def write_config(path, gpu_name, installer, allow_untested=False):
     base = data_home()/'crealityscan-linux'
     runtime = base/'runtime'
     c = json.loads((ROOT/'config/config.example.json').read_text())
     c.update(runner=str(fetch.runner(runtime)), dxvk_dir=str(fetch.dxvk(runtime)),
              installer=str(installer), data_dir=str(base/'data'), exports_dir=str(default_dir()),
-             gpu_name=gpu_name)
+             gpu_name=gpu_name, allow_untested_version=allow_untested)
     if 'nvidia' in gpu_name.lower() and other_gpu_present():
         # On hybrid laptops apps render on the Intel/AMD GPU unless PRIME render
         # offload is requested for the NVIDIA one.
@@ -110,23 +126,27 @@ def write_config(path, gpu_name, installer):
     print('Created', path, flush=True)
 
 
-def prepare(config, installer=None, gpu_name=None):
+def prepare(config, installer=None, gpu_name=None, allow_untested=False):
     """Return a loaded config, creating it (and downloading pinned inputs) if needed."""
     if Path(config).exists():
         print('Using existing config', config, flush=True)
         return load(config)
-    installer = Path(installer).expanduser().resolve() if installer else find_installer()
+    installer = Path(installer).expanduser().resolve() if installer else find_installer(allow_untested)
+    versions = ', '.join(r['version'] for r in LOCK['crealityscan_tested'])
     if not installer:
-        raise RuntimeError('CrealityScan_win_4.3.2.exe not found in Downloads. Download CrealityScan '
-                           '4.3.2 for Windows from Creality, then rerun setup (or pass --installer PATH)')
-    if digest(installer) != LOCK['installer_sha256']:
-        raise RuntimeError(f'{installer} is not the tested CrealityScan 4.3.2 installer')
+        raise RuntimeError(f'No CrealityScan installer found in Downloads. Download CrealityScan for Windows '
+                           f'(tested: {versions}) from Creality, then rerun setup (or pass --installer PATH)')
+    release = tested('installer', digest(installer))
+    if not release and not allow_untested:
+        raise RuntimeError(f'{installer.name} is not a tested CrealityScan installer (tested: {versions}). '
+                           'Rerun setup with --allow-untested to try it anyway.')
+    print('CrealityScan:', release['version'] + ' (tested)' if release else 'UNTESTED version', flush=True)
     gpu_name = gpu_name or detect_gpu()
     if not gpu_name:
         raise RuntimeError('No OpenCL GPU found. Install your GPU OpenCL driver (docs/SETUP.md), '
                            'or pass --gpu-name with your GPU model')
     print('GPU:', gpu_name, '| Installer:', installer, flush=True)
-    write_config(config, gpu_name, installer)
+    write_config(config, gpu_name, installer, allow_untested and not release)
     return load(config)
 
 
@@ -149,6 +169,29 @@ def set_aside_incomplete(c):
     print(f'An earlier install that setup could not verify (unfinished, or made from another copy of\n'
           f'this project) was moved aside to {aside}.\n'
           f'Your scans in {c["exports_dir"]} are not affected. Delete it once setup has finished.', flush=True)
+    return aside
+
+
+def retire_stale(c):
+    """After an update with different helpers, an existing install no longer matches
+    its trusted baseline. Move it aside together with its baseline (nothing is
+    deleted) so setup installs fresh. Scans and projects live in the exports folder."""
+    from integrity import installation_path
+    baseline, data = installation_path(c), c['data_dir']
+    manifest = ROOT/'build/manifest.json'
+    if not baseline.is_file() or not manifest.is_file() or not data.is_dir() or data.is_symlink():
+        return None
+    if json.loads(baseline.read_text()).get('build') == json.loads(manifest.read_text()):
+        return None
+    lock = owned(c)
+    try:
+        aside = data.with_name(f'{data.name}.previous-{datetime.datetime.now():%Y%m%d-%H%M%S}')
+        os.rename(data, aside)
+        os.rename(baseline, aside/'trusted-baseline.json')
+    finally:
+        lock.close()
+    print(f'This update changes the helper programs, so CrealityScan is reinstalled. The previous install\n'
+          f'was moved to {aside}; delete it once the new one works. Scans in {c["exports_dir"]} are untouched.', flush=True)
     return aside
 
 

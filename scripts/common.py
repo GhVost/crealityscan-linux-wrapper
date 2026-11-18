@@ -13,6 +13,9 @@ ENV_KEYS={'OCL_ICD_VENDORS','RUSTICL_ENABLE','ROCR_VISIBLE_DEVICES','DRI_PRIME',
           '__NV_PRIME_RENDER_OFFLOAD','__GLX_VENDOR_LIBRARY_NAME'}
 def digest(p):
     with Path(p).open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
+def tested(kind,h):
+    """The tested CrealityScan release whose installer or SDK has this SHA-256, if any."""
+    return next((r for r in LOCK['crealityscan_tested'] if r[kind+'_sha256']==h),None)
 def expect(p,h):
     if digest(p)!=h:raise RuntimeError(f'Unsupported or changed dependency: {p}')
 def load(path):
@@ -26,7 +29,8 @@ def load(path):
     if not isinstance(env,dict) or set(env)-ENV_KEYS or not all(isinstance(v,str) and '\0' not in v for v in env.values()):raise ValueError('Unsupported environment configuration')
     for key in ('blue_laser_fix','device_memory_fix'):
         if not isinstance(c.get(key),bool):raise ValueError(f'{key} must be boolean')
-    if not isinstance(c.get('allow_host_network',False),bool):raise ValueError('allow_host_network must be boolean')
+    for key in ('allow_host_network','allow_untested_version'):
+        if not isinstance(c.get(key,False),bool):raise ValueError(f'{key} must be boolean')
     c['display']=c.get('display') or 'desktop'
     if c['display'] not in MODES:raise ValueError('display must be "desktop" or "isolated"')
     c['prefix']=c['data_dir']/'prefix'
@@ -47,7 +51,10 @@ def dependencies(c,installer=False):
     accepted=[LOCK['dxvk'],*({n:h for n,h in a.items() if n.endswith('.dll')} for a in LOCK.get('dxvk_also_accepted',[]))]
     if not any(all((c['dxvk_dir']/n).is_file() and digest(c['dxvk_dir']/n)==h for n,h in a.items()) for a in accepted):
         raise RuntimeError(f'Unsupported or changed dependency: DXVK in {c["dxvk_dir"]}')
-    if installer:expect(c['installer'],LOCK['installer_sha256'])
+    if installer and not tested('installer',digest(c['installer'])) and not c.get('allow_untested_version',False):
+        raise RuntimeError(f'{c["installer"]} is not a tested CrealityScan installer (tested: '
+                           +', '.join(r['version'] for r in LOCK['crealityscan_tested'])
+                           +'). To try it anyway, set allow_untested_version=true in the config or run setup with --allow-untested.')
 
 def owned(c,create=False):
     state=c['data_dir'];mark=state/'community-owner.json'

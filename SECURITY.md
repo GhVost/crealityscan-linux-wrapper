@@ -62,12 +62,24 @@ it in Wi-Fi mode. Do not treat Wi-Fi mode as equivalent to USB security
 isolation. A separate network broker would require additional implementation and
 scanner validation. Nothing here authenticates the vendor SDK's Wi-Fi protocol.
 
+### Wi-Fi and online mode
+
+`launch --online` (the menu entry's **Open online** action) is USB mode with the
+same host network as Wi-Fi mode, for calibration-board downloads and firmware
+updates. It needs the same `allow_host_network: true` opt-in and has the same
+weaker network boundary; filesystem, device and display isolation are unchanged.
+The app then also reaches Creality's analytics, crash-report and update servers.
+Firmware updates change the scanner itself and are untested with this project.
+The default menu entry stays offline.
+
 ## Integrity
 
 The entire runner file/link inventory is hashed against a tree fingerprint
 derived from the SHA-256-verified upstream archive. The fingerprint covers both
 architectures, support libraries and build headers; additions/removals also fail.
-DXVK and installer hashes remain separately pinned. System libraries and the
+DXVK hashes remain separately pinned. CrealityScan installers and their bundled
+SDK are accepted by hash from `crealityscan_tested`; any other version needs the
+explicit `allow_untested_version` opt-in (`setup --allow-untested`). System libraries and the
 compiler are maintained through the host package manager, not this project.
 
 `setup` and `fetch` download the runner, DXVK and prebuilt helpers only from URLs
@@ -75,8 +87,15 @@ pinned in `config/versions.lock.json`, check the pinned SHA-256 before keeping o
 unpacking them, and refuse archive paths or links that leave the target folder.
 Prebuilt helper files must also match the manifest inside their archive. Using a
 prebuilt release means trusting this repository's GitHub Actions build:
-`gh attestation verify <archive> --repo doolan-oss/crealityscan-linux-compat`
+`gh attestation verify <archive> --repo GhVost/crealityscan-linux-wrapper`
 checks its build provenance, and `build` produces the helpers from source instead.
+The `.run` package and offline pack carry a `SHA256SUMS` that the installer checks
+before unpacking; release pages list the package's own SHA-256.
+
+The SDK proxy's export table is generated on the host from the installed
+`OrbbecSDK.dll` (`scripts/pe_exports.py`). That file comes from the vendor
+installer, so the parser bounds-checks every offset, caps sizes and counts, and
+accepts only printable export names; it produces forwarders only, never code.
 
 Fresh installation creates a host-side baseline in
 `~/.local/share/crealityscan-linux/trust/` (under `$XDG_DATA_HOME` if set), keyed
@@ -95,8 +114,9 @@ Missing, changed or additional executable files fail verification. The baseline
 also records the trusted helper build. Empty baselines are rejected.
 
 The old writable `data_dir/installation.json` is not a trust source. Old prefixes
-are not automatically adopted or upgraded: use a **new data directory** and fresh
-installation. Do not regenerate hashes to bless a potentially modified prefix.
+are not automatically adopted or upgraded. When an update brings different helper
+programs, `setup` moves the old data directory aside (`data.previous-…`, with its
+baseline inside it) and installs fresh; nothing is rebaselined in place. Do not regenerate hashes to bless a potentially modified prefix.
 Moving a data directory changes its identity. When `setup` finds a populated
 prefix it has no baseline for, it renames that data directory to
 `<name>.previous-<time>` and installs afresh; it never adopts or deletes it.

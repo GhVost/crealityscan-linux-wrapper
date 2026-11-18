@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""CrealityScan 4.3.2 on Linux: setup and launcher, confined to an owned prefix."""
+"""CrealityScan on Linux: setup and launcher, confined to an owned prefix."""
 import argparse,datetime,json,os,shutil,subprocess,sys
 from contextlib import nullcontext
 from integrity import installation_path, save_installation, verify_installation
 import stateio
 from pathlib import Path
-from common import ROOT,RUNTIME_ROOT,LOCK,load,dependencies,digest,expect,owned,environment,sandbox,winpath
+from common import ROOT,RUNTIME_ROOT,LOCK,load,dependencies,digest,expect,owned,environment,sandbox,winpath,tested
+import pe_exports
 from display import open_display
 from exports import default_dir,link_folders
 from build import build
@@ -54,16 +55,25 @@ def install(c):
     prefix.mkdir(exist_ok=True);log=logdir(c,'install')
     print('Installing into new prefix:',prefix,flush=True)
     code=wine(c,log,[winpath(c['installer']),'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',r'/DIR=C:\Program Files\CrealityScan','/LOG='+winpath(log/'installer.log')],
-              extra={'LD_PRELOAD':'','WINEDLLOVERRIDES':'winemenubuilder.exe=d;opencl=b;mscoree,mshtml=d'},gpu=False,seconds=240)
+              extra={'LD_PRELOAD':'','WINEDLLOVERRIDES':'winemenubuilder.exe=d;opencl=b;mscoree,mshtml=d'},gpu=False,seconds=900)
     if code:raise RuntimeError('Installer failed; prefix/logs preserved')
     app=appdir(c);plugins=app/'CrealityScan_Data/Plugins/x86_64';sdk=plugins/'OrbbecSDK.dll'
-    expect(sdk,LOCK['sdk_sha256'])
-    if not (app/'CrealityScan.exe').is_file():raise RuntimeError('Installed executable missing')
+    if not (app/'CrealityScan.exe').is_file() or not sdk.is_file():raise RuntimeError('Installed executable or SDK missing')
+    release=tested('sdk',digest(sdk))
+    if release:print('CrealityScan',release['version'],'(tested)',flush=True)
+    elif c.get('allow_untested_version',False):
+        print('WARNING: this CrealityScan version is untested with this project. If the scanner or app misbehaves,\n'
+              'install a tested version (see config/versions.lock.json) and please report the result.',flush=True)
+    else:raise RuntimeError('Installed SDK is not from a tested CrealityScan version; prefix preserved')
     stateio.copy_file(sdk,plugins/'OrbbecSDK-stock.dll')
+    # The proxy's export table is copied from this SDK, so any version's exports forward unchanged.
+    with stateio.open_file(sdk) as f:exports=pe_exports.read_exports(f.read(64*1024*1024))
+    proxy=pe_exports.add_forwarders((ROOT/'build/sdk-proxy-stub.dll').read_bytes(),'OrbbecSDK.dll','OrbbecSDK-stock',exports)
+    print('SDK proxy forwards',len(exports[1]),'exports',flush=True)
     sdklib=prefix/'drive_c/bridge-sdk';stateio.ensure_directory(sdklib);stateio.copy_file(sdk,sdklib/'OrbbecSDK.dll')
     for name in ('mf.dll','pikacam.dll'):stateio.copy_file(ROOT/'build'/name,app/name)
     stateio.copy_file(c['runner']/'lib/wine/x86_64-windows/mf.dll',app/'mfstock.dll')
-    stateio.copy_file(ROOT/'build/sdk-proxy.dll',sdk,replace=True)
+    with stateio.open_file(sdk,'replace') as f:f.write(proxy)
     for name in LOCK['dxvk']:stateio.copy_file(c['dxvk_dir']/name,app/name,replace=True)
     diag=prefix/'drive_c/diagnostics';stateio.ensure_directory(diag)
     for name in hashes:
@@ -92,9 +102,11 @@ def prepare_exports(c):
     if moved:print('Moved into it from the prefix:',', '.join(moved),flush=True)
     for folder in kept:print('Note: left in the prefix (name already used, other disk or unexpected link):',folder,flush=True)
 
-def launch(c,mode,smoke=False):
-    if mode=='wifi' and not c.get('allow_host_network',False):
-        raise RuntimeError('Wi-Fi requires explicit allow_host_network=true; read the weaker isolation boundary in SECURITY.md')
+def launch(c,mode,smoke=False,online=False):
+    if (mode=='wifi' or online) and not c.get('allow_host_network',False):
+        raise RuntimeError(('Wi-Fi' if mode=='wifi' else 'Online mode (calibration downloads, updates)')+
+                           ' needs allow_host_network=true in '+str(c.get('config_path','the config'))+
+                           '; read the weaker isolation boundary in SECURITY.md')
     dependencies(c);lock=owned(c);verify_install(c);log=logdir(c,'smoke'if smoke else mode);prepare_exports(c)
     e={};nodes=[];scanner_lock=None
     if mode=='usb' and not smoke:
@@ -102,7 +114,7 @@ def launch(c,mode,smoke=False):
         e,nodes,scanner_lock=prepare(c)
     if smoke:e['DXVK_HUD']='devinfo'
     code=wine(c,log,[winpath(appdir(c)/'CrealityScan.exe'),'-logFile',winpath(log/'Player.log')],
-              extra=e,devices=nodes,network=mode=='wifi' and not smoke,seconds=35 if smoke else 0,workdir=appdir(c),exports=True)
+              extra=e,devices=nodes,network=(mode=='wifi' or online) and not smoke,seconds=35 if smoke else 0,workdir=appdir(c),exports=True)
     if smoke:
         player=stateio.read_text(log/'Player.log')if (log/'Player.log').exists()else ''
         success=code in (0,124) and any(s in player for s in ('HomeState','HomePanel')) and 'Direct3D' in player
@@ -114,21 +126,23 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--config',type=Path,default=ROOT/'config.local.json')
     sub=ap.add_subparsers(dest='command',required=True)
     p=sub.add_parser('setup',help='download pinned inputs, configure, install, check and add a menu entry')
-    p.add_argument('--installer',help='CrealityScan_win_4.3.2.exe (default: found in Downloads)');p.add_argument('--gpu-name',help='default: detected OpenCL GPU')
+    p.add_argument('--installer',help='CrealityScan_win_<version>.exe (default: newest found in Downloads)');p.add_argument('--gpu-name',help='default: detected OpenCL GPU')
+    p.add_argument('--allow-untested',action='store_true',help='accept a CrealityScan version this project has not tested')
     sub.add_parser('survey',help='describe connected Creality scanners for a hardware report (read-only)')
     p=sub.add_parser('fetch',help='download the pinned Wine runner and DXVK');p.add_argument('--dir',type=Path,default=onboard.data_home()/'crealityscan-linux/runtime')
     p=sub.add_parser('configure');p.add_argument('--runner',required=True);p.add_argument('--installer',required=True);p.add_argument('--dxvk-dir',required=True);p.add_argument('--data-dir',required=True)
     for cmd in ('doctor','install','diagnose','smoke'):sub.add_parser(cmd)
     p=sub.add_parser('build');p.add_argument('--portable',action='store_true',help='link libyuv statically (release builds)')
     p=sub.add_parser('launch');p.add_argument('--mode',choices=('usb','wifi'),default='usb')
+    p.add_argument('--online',action='store_true',help='also allow internet access (calibration-board data, firmware); needs allow_host_network')
     args=ap.parse_args()
     if args.command=='survey':
         import survey;print(survey.report());return
     if args.command=='fetch':
         print('runner:',fetch.runner(args.dir));print('dxvk:',fetch.dxvk(args.dir));return
     if args.command=='setup':
-        c=onboard.prepare(args.config,args.installer,args.gpu_name)
-        dependencies(c,installer=True);onboard.helpers(c,build);onboard.set_aside_incomplete(c)
+        c=onboard.prepare(args.config,args.installer,args.gpu_name,args.allow_untested)
+        dependencies(c,installer=True);onboard.helpers(c,build);onboard.retire_stale(c);onboard.set_aside_incomplete(c)
         install(c);diagnose(c);onboard.finish(args.config);return
     if args.command=='configure':
         c=json.loads((ROOT/'config/config.example.json').read_text())
@@ -136,7 +150,7 @@ def main():
         c['exports_dir']=str(default_dir())
         with args.config.open('x')as f:json.dump(c,f,indent=2);f.write('\n')
         print('Created local config; edit GPU/environment settings before running install:',args.config);return
-    c=load(args.config)
+    c=load(args.config);c['config_path']=args.config
     if args.command=='doctor':
         dependencies(c,installer=True)
         required=['bwrap','python3','pgrep','fuser','timeout']
@@ -153,7 +167,7 @@ def main():
     elif args.command=='install':install(c)
     elif args.command=='diagnose':diagnose(c)
     elif args.command=='smoke':launch(c,'usb',smoke=True)
-    elif args.command=='launch':launch(c,args.mode)
+    elif args.command=='launch':launch(c,args.mode,online=args.online)
 
 def notify(message):
     # Menu launches have no terminal; show failures on the desktop instead.

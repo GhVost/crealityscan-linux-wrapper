@@ -1,12 +1,14 @@
-# Builds and tests the helper binaries on every change. A helpers-v* tag also
-# publishes them as a release with build provenance tied to this workflow run.
+# Builds and tests the helper binaries on every change. A v* tag also builds the
+# self-installing package (.run) and offline pack and publishes them as a release,
+# with build provenance tied to this workflow run. helpers-v* tags publish only
+# the helper archive.
 name: helpers
 
 on:
   pull_request:
   push:
     branches: [main]
-    tags: ['helpers-v*']
+    tags: ['v*', 'helpers-v*']
 
 permissions:
   contents: read
@@ -58,7 +60,7 @@ jobs:
           # sdk-frame-helper statically contains libyuv and libjpeg-turbo; the
           # Windows DLLs contain Wine's LGPL interface-ID tables (see THIRD_PARTY_NOTICES.md).
           mkdir build/licenses
-          cp LICENSE build/licenses/crealityscan-linux-compat-LICENSE
+          cp LICENSE build/licenses/crealityscan-linux-wrapper-LICENSE
           cp NOTICE.md THIRD_PARTY_NOTICES.md build/licenses/
           cp -L /usr/share/doc/libyuv-dev/copyright build/licenses/libyuv-copyright
           cp -L /usr/share/doc/libjpeg-turbo8-dev/copyright build/licenses/libjpeg-turbo-copyright
@@ -99,3 +101,38 @@ jobs:
           EOF
           gh release create "$GITHUB_REF_NAME" "$PACKAGE" "$PACKAGE.sha256" \
             --title "Prebuilt helpers $GITHUB_REF_NAME" --notes-file notes.md
+
+      - name: Build installer package
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          python3 scripts/pack.py --cache "$RUNNER_TEMP/runtime/downloads" --out dist
+          cat dist/SHA256SUMS
+
+      - name: Attest installer provenance
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*.run, dist/*.tar.gz
+
+      - name: Publish installer release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=$(ls dist/*.run)
+          cat > notes.md <<EOF
+          Self-installing CrealityScan Linux Wrapper. Download the \`.run\` file and follow the [Install steps in the README](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}#install):
+
+              sh $(basename "$run")
+
+          You also need CrealityScan for Windows from Creality in your Downloads folder; it is not included. Tested versions: $(python3 -c 'import json; print(", ".join(r["version"] for r in json.load(open("config/versions.lock.json"))["crealityscan_tested"]))').
+
+          - \`*.run\`: self-installing package (installs to ~/.local/share/crealityscan-linux, adds a menu entry; \`--uninstall\` removes it).
+          - \`*-pack.tar.gz\`: the same contents as a plain archive; unpack and run \`./install.sh\`.
+          - Both bundle the pinned Wine runner and DXVK, so installing needs no internet.
+          - Built by this repository's workflow on Ubuntu 24.04 from ${GITHUB_SHA}. Verify: \`gh attestation verify <file> --repo ${GITHUB_REPOSITORY}\`
+          - SHA-256:
+          $(sed 's/^/    /' dist/SHA256SUMS)
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/*.run dist/*.tar.gz dist/SHA256SUMS \
+            --title "CrealityScan Linux Wrapper $GITHUB_REF_NAME" --notes-file notes.md

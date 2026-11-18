@@ -3,6 +3,14 @@ can run under the system interpreter with `python3 -I`."""
 import ctypes as C
 
 
+def match_name(name):
+    """The part of an OpenCL device name the probes can find in both the OpenCL name and
+    the OpenGL renderer. AMD and NVIDIA report the same model in both; Intel's OpenCL
+    name ('Intel(R) Arc(TM) Graphics') and Mesa renderer ('Mesa Intel(R) Graphics (ARL)')
+    share only the vendor."""
+    return 'Intel' if name and name.lower().startswith('intel') else name
+
+
 def detect():
     """Name of the strongest OpenCL GPU as the probes match it (e.g. 'AMD Radeon RX 6800 XT').
     Discrete GPUs (own memory) win over integrated ones, then more compute units."""
@@ -34,7 +42,7 @@ def detect():
             units = info(device, 0x1002, C.c_uint)    # CL_DEVICE_MAX_COMPUTE_UNITS
             if name:
                 found.append((not (unified and unified.value), units.value if units else 0, name))
-    return max(found)[2] if found else None
+    return match_name(max(found)[2]) if found else None
 
 
 if __name__ == '__main__':

@@ -97,17 +97,32 @@ class OnboardTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
 
+    def tested(self, *paths):
+        return patch.dict(onboard.LOCK, {'crealityscan_tested': [
+            {'version': f'9.{i}', 'installer_sha256': sha(p), 'sdk_sha256': str(i)*64} for i, p in enumerate(paths)]})
+
     def test_installer_found_by_checksum_only(self):
         downloads = self.root/'Downloads'; downloads.mkdir()
-        (downloads/'CrealityScan_win_4.3.2.exe').write_bytes(b'not the installer')
-        real = downloads/'CrealityScan_win_4.3.2 (1).exe'; real.write_bytes(b'installer')
-        with patch('onboard.downloads_dir', return_value=downloads), \
-             patch.dict(onboard.LOCK, {'installer_sha256': sha(real)}):
+        (downloads/'CrealityScan_win_4.3.3.exe').write_bytes(b'not the installer')
+        real = downloads/'CrealityScan_win_4.3.3 (1).exe'; real.write_bytes(b'installer')
+        with patch('onboard.downloads_dir', return_value=downloads), self.tested(real):
             self.assertEqual(onboard.find_installer(), real)
         with patch('onboard.downloads_dir', return_value=downloads), \
-             patch.dict(onboard.LOCK, {'installer_sha256': '0'*64}), \
+             patch.dict(onboard.LOCK, {'crealityscan_tested': []}), \
              patch.dict(os.environ, {'HOME': str(self.root/'home')}):
             self.assertIsNone(onboard.find_installer())
+
+    def test_newest_tested_first_and_untested_only_on_request(self):
+        downloads = self.root/'Downloads'; downloads.mkdir()
+        old = downloads/'CrealityScan_win_4.3.2.exe'; old.write_bytes(b'old')
+        new = downloads/'CrealityScan_win_4.3.3.exe'; new.write_bytes(b'new')
+        future = downloads/'CrealityScan_win_4.10.0.exe'; future.write_bytes(b'future')
+        with patch('onboard.downloads_dir', return_value=downloads), \
+             patch.dict(os.environ, {'HOME': str(self.root/'home')}), self.tested(new, old):
+            self.assertEqual(onboard.find_installer(), new)
+            self.assertEqual(onboard.find_installer(allow_untested=True), future)
+        self.assertEqual(onboard.installer_version('CrealityScan_win_4.10.0 (1).exe'), (4, 10, 0))
+        self.assertIsNone(onboard.installer_version('setup.exe'))
 
     def test_desktop_entry_quotes_paths(self):
         self.assertEqual(onboard.desktop_quote('/plain/path'), '/plain/path')
@@ -124,7 +139,9 @@ class OnboardTests(unittest.TestCase):
              self.assertRaisesRegex(RuntimeError, 'Downloads'):
             onboard.prepare(self.root/'config.json')
         installer = self.root/'setup.exe'; installer.write_bytes(b'installer')
-        with patch.dict(onboard.LOCK, {'installer_sha256': sha(installer)}), \
+        with self.assertRaisesRegex(RuntimeError, '--allow-untested'):
+            onboard.prepare(self.root/'config.json', installer)
+        with self.tested(installer), \
              patch('onboard.detect_gpu', return_value=None), \
              self.assertRaisesRegex(RuntimeError, 'OpenCL'):
             onboard.prepare(self.root/'config.json', installer)
@@ -209,6 +226,16 @@ class RerunTests(unittest.TestCase):
         current = integrity.TRUST_ROOT/legacy.name
         current.parent.mkdir(parents=True); current.write_text('{}')
         self.assertEqual(integrity.installation_path(c), current)
+
+
+
+class GpuNameTests(unittest.TestCase):
+    def test_intel_reduced_to_vendor_others_kept(self):
+        import gpuinfo
+        self.assertEqual(gpuinfo.match_name('Intel(R) Arc(TM) Graphics'), 'Intel')
+        self.assertEqual(gpuinfo.match_name('AMD Radeon RX 6800 XT'), 'AMD Radeon RX 6800 XT')
+        self.assertEqual(gpuinfo.match_name('NVIDIA T600 Laptop GPU'), 'NVIDIA T600 Laptop GPU')
+        self.assertIsNone(gpuinfo.match_name(None))
 
 
 if __name__ == '__main__':

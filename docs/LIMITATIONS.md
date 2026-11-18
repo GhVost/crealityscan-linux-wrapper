@@ -1,5 +1,33 @@
 # Compatibility and acceptance boundaries
 
+CrealityScan 4.3.3 (bundled Orbbec SDK SHA-256 6987…d740, which adds six exports
+over 4.3.2) has passed install, all three diagnostics (OpenCL, OpenGL,
+synthetic Media Foundation) and a startup smoke test on Ubuntu 26.04 with Intel
+Arc graphics (intel-opencl-icd). With a physical Pika (firmware not upgraded)
+over USB 3: SDK detection through the proxy, scanner controls, the scanner's
+buttons, IR and colour preview, and starting and pausing Blue Laser scans with
+markers. 4.3.3's blue-laser OpenCL program is byte-identical to 4.3.2's: the
+pinned fingerprint matched and the 16-bit atomic fix applied. Not yet confirmed
+on 4.3.3: meshing, STL export and reopening a project. Those scanner sessions used
+a compiler-built proxy; the install-time generated proxy that replaced it has an
+identical export table (checked by reading both back) and passed install, the
+diagnostics and startup, but has not yet been used with a physical scanner.
+
+Untested CrealityScan versions (`--allow-untested`) get the same generated proxy,
+but the bridge and the blue-laser OpenCL fix depend on SDK and kernel behaviour
+that a new version may change; the OpenCL fix stays inactive for an unknown
+kernel. Treat any new version as unverified until a scan has been exported.
+
+4.3.3 observations: the device rejects SDK properties 151 and 152 (error 3) at
+each stream start, with no visible effect so far; the app's performance test
+refuses to run on battery (`OB_SCAN_ERROR_NO_PLUG_IN_POWER`, as on Windows);
+calibration needs Creality's server for board data, which the default USB
+sandbox blocks (scanning with the factory calibration works); `launch --online`
+allows it but calibration through it has not been tested yet. Switching the scanner
+off during a session makes the app crash or stop with a USB "No such device"
+error and the launcher exit with code 3; switch it on and relaunch. The notes
+below describe the 4.3.2 results.
+
 Known original setup: CrealityScan 4.3.2, SDK 3.5.3.260921, Pika firmware 1.1.1,
 CachyOS x86-64, RX 6800 XT, ROCm OpenCL, standalone Wine 11 with Proton 11.0's
 DXVK, XWayland. The pinned official DXVK 3.1.1 with CI-built helpers has since

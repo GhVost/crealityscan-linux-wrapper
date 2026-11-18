@@ -1,140 +1,210 @@
-# CrealityScan on Linux — community Pika support
+# CrealityScan Linux Wrapper
 
-Run **CrealityScan 4.3.2** with a **Creality Pika** scanner on Linux (other
-Creality scanners: [see below](#other-creality-scanners)). The app runs
-in Wine inside a sandbox, opens as normal desktop windows, and saves your scans
-to an ordinary `Documents/CrealityScan` folder. This is an unofficial,
-experimental community project; you supply the CrealityScan installer yourself.
+Run **CrealityScan for Windows** with a **Creality Pika** 3D scanner on Linux, as a
+normal app in your app menu. CrealityScan runs in Wine inside a sandbox, opens as
+ordinary desktop windows and saves scans to `Documents/CrealityScan`.
 
-Tested on CachyOS with an AMD RX 6800 XT (ROCm OpenCL) on KDE Plasma. A user
-also reports setup and the GPU check passing on TUXEDO OS with an NVIDIA T600
-laptop GPU. Other distributions and GPUs may work but are untested; read
-[LIMITATIONS.md](docs/LIMITATIONS.md) before relying on it.
+This is an unofficial community project, not affiliated with Creality or Orbbec.
+You download CrealityScan yourself from Creality; it is never bundled here.
+
+It is a fork of
+[doolan-oss/crealityscan-linux-compat](https://github.com/doolan-oss/crealityscan-linux-compat),
+which wrote the USB camera bridge, sandbox and OpenCL fixes. This fork adds:
+
+- **Any CrealityScan version.** The SDK proxy is generated at install time from the
+  installed SDK, so new versions no longer need a rebuild. Tested versions are
+  accepted automatically; others with `--allow-untested`.
+- **Any GPU with Vulkan and OpenCL**, detected automatically: AMD, NVIDIA (including
+  hybrid laptops) and Intel.
+- **A self-installing package** (`.run`) that works offline, with an uninstaller.
+- **Online mode** for calibration-board data and firmware updates (opt-in).
 
 ## Install
 
-1. Install the required packages:
-   - Arch/CachyOS: `sudo pacman -S --needed git bubblewrap python psmisc procps-ng`
-   - Ubuntu 24.04: `sudo apt install git bubblewrap python3 psmisc procps`
+1. **Install the system packages** (once).
 
-   Your GPU also needs a Vulkan driver and an OpenCL driver. On AMD, the tested
-   OpenCL driver is ROCm (`rocm-opencl-runtime` on Arch/CachyOS). On NVIDIA, use
-   the proprietary driver with its OpenCL support (`opencl-nvidia` on Arch).
-   On laptops with both Intel and NVIDIA graphics, setup selects the NVIDIA GPU.
-2. Download **CrealityScan 4.3.2 for Windows** (`CrealityScan_win_4.3.2.exe`)
-   from Creality into your Downloads folder.
-3. Get this project and run setup:
+   Ubuntu / Debian:
+   ```sh
+   sudo apt install bubblewrap python3 psmisc procps
+   sudo dpkg --add-architecture i386 && sudo apt update
+   sudo apt install libc6:i386 libfreetype6:i386 libx11-6:i386 libxext6:i386 libxcursor1:i386 \
+     libxrandr2:i386 libxi6:i386 libxfixes3:i386 libxrender1:i386 libxcomposite1:i386 \
+     libxinerama1:i386 libxkbcommon0:i386 libfontconfig1:i386 libudev1:i386 libusb-1.0-0:i386 \
+     libasound2t64:i386 libpulse0:i386 libgl1:i386 libvulkan1:i386 libwayland-client0:i386 \
+     libglib2.0-0t64:i386
+   ```
+   Arch / CachyOS (enable `[multilib]` first; this 32-bit list is untested):
+   ```sh
+   sudo pacman -S --needed bubblewrap python psmisc procps-ng lib32-glibc lib32-freetype2 \
+     lib32-libx11 lib32-vulkan-icd-loader
+   ```
+   The 32-bit libraries are for Wine, which runs CrealityScan's 32-bit installer.
+
+2. **Install your GPU's OpenCL driver.** CrealityScan processes scans with OpenCL.
+
+   | GPU | Ubuntu / Debian | Arch / CachyOS |
+   |---|---|---|
+   | Intel | `intel-opencl-icd` | `intel-compute-runtime` |
+   | AMD | ROCm OpenCL | `rocm-opencl-runtime` |
+   | NVIDIA | proprietary driver with OpenCL | `opencl-nvidia` |
+
+   A Vulkan driver is also needed; desktop distributions normally have one.
+
+3. **Download CrealityScan for Windows** from
+   [Creality](https://www.creality.com/download/creality-pika) into your Downloads
+   folder (`CrealityScan_win_<version>.exe`).
+
+4. **Run the installer package** from the
+   [Releases page](https://github.com/GhVost/crealityscan-linux-wrapper/releases):
 
    ```sh
-   git clone https://github.com/doolan-oss/crealityscan-linux-compat.git
-   cd crealityscan-linux-compat
-   python3 scripts/creality.py setup
+   sh crealityscan-linux-*.run
    ```
 
-   Setup downloads the rest (Wine, DXVK and this project's prebuilt helpers,
-   about 100 MB), checks every download against a pinned checksum, installs
-   CrealityScan, runs a GPU check and adds **CrealityScan** to your app menu.
-   Allow about 3 GB of disk space.
-4. If setup prints a `sudo` command for scanner access, run it once, then
-   unplug and replug the scanner.
-5. Connect the scanner by USB and open **CrealityScan** from your app menu.
+   It unpacks to `~/.local/share/crealityscan-linux/app`, installs CrealityScan,
+   checks your GPU and adds **CrealityScan** to your app menu. It needs no
+   internet connection and about 3 GB of disk space; installing takes a few minutes.
 
-Keep the `crealityscan-linux-compat` folder: the menu entry runs from it.
+5. **Allow scanner access** (once). If the installer prints a `sudo` command, run
+   it, then unplug and replug the scanner:
+
+   ```sh
+   sudo cp ~/.local/share/crealityscan-linux/app/config/70-creality-pika.rules /etc/udev/rules.d/
+   sudo udevadm control --reload
+   ```
+
+6. **Connect the scanner by USB**, switch it on, and open **CrealityScan** from your
+   app menu.
+
+To update, run a newer `.run` the same way. Your settings and scans are kept.
+To uninstall, run `sh crealityscan-linux-*.run --uninstall` (or
+`~/.local/share/crealityscan-linux/app/uninstall.sh`). Scans in
+`Documents/CrealityScan` are kept.
+
+### CrealityScan versions
+
+| Version | Status |
+|---|---|
+| 4.3.3 | Tested: install, GPU checks, Pika detection, buttons, live preview, scanning |
+| 4.3.2 | Tested by the original project, including full scans and STL export |
+
+A version not listed is refused, because nobody has checked it yet. To try it:
+
+```sh
+sh crealityscan-linux-*.run --allow-untested
+```
+
+If it works (or doesn't), please file a
+[hardware report](https://github.com/GhVost/crealityscan-linux-wrapper/issues/new?template=hardware-report.yml).
 
 ## Using it
 
-- **Saving:** in the app's save dialog choose **Documents**. That is
-  `~/Documents/CrealityScan` on Linux; projects are kept in its `Projects` folder.
-  To import a model, copy it into that folder first.
-- **Startup:** if the window opens behind other windows, click it. The app pauses
-  loading while it is in the background.
-- **Setup stopped with an error?** Fix the cause and run setup again. A
-  half-finished install is moved aside to `data.previous-…` automatically
-  (delete it once setup finishes); your scans are not touched.
-- **Problems:** if the app can't start you'll usually get a desktop notification; logs
-  are in `~/.local/share/crealityscan-linux/data/logs`. Wi-Fi mode and other
-  options are in [SETUP.md](docs/SETUP.md).
+- **Plug in your laptop's charger.** CrealityScan refuses its performance test on
+  battery power, on Windows too.
+- **Close the app before switching the scanner off.** Switching it off while the app
+  runs makes the app crash.
+- **Saving:** choose **Documents** in the save dialog. That is
+  `~/Documents/CrealityScan`; projects are in its `Projects` folder. To import a
+  model, copy it into that folder first.
+- **Window behind others?** Click it. The app pauses loading while in the background.
+- **Scanner buttons:** middle starts and pauses, down zooms, **left deletes the
+  scan**. End a scan with the on-screen tick instead.
+- **Problems:** you'll usually get a desktop notification. Logs are in
+  `~/.local/share/crealityscan-linux/data/logs`.
 
-**Help test it:** this has only been tested on one computer. Whether it worked
-or not, please file a
-[hardware report](https://github.com/doolan-oss/crealityscan-linux-compat/issues/new?template=hardware-report.yml)
-with your distribution and GPU.
+### Online mode (calibration, firmware updates)
 
-To uninstall, delete `~/.local/share/crealityscan-linux`,
-`~/.local/share/applications/crealityscan-linux.desktop` and the
-`crealityscan-linux-compat` folder. Your scans in `~/Documents/CrealityScan` stay.
+By default the app has **no internet access**. Calibration needs to download your
+calibration board's data from Creality, and firmware updates need the internet too.
+To allow it:
 
-## Other Creality scanners
+1. Read the *Wi-Fi and online mode* section of [SECURITY.md](SECURITY.md): with
+   network access the app shares your computer's network and can reach local
+   services. The rest of the sandbox stays in place.
+2. Set `"allow_host_network": true` in
+   `~/.local/share/crealityscan-linux/app/config.local.json`.
+3. Right-click **CrealityScan** in your app menu and choose **Open online
+   (calibration, firmware updates)**, or run:
+   ```sh
+   python3 ~/.local/share/crealityscan-linux/app/scripts/creality.py \
+     --config ~/.local/share/crealityscan-linux/app/config.local.json launch --online
+   ```
 
-Only the **Creality Pika** works so far: the USB bridge recognises only the Pika,
-and with another scanner connected the app stops with a message saying so.
-CrealityScan itself supports other Creality scanners (such as the Raptor, Otter
-and Ferret families), and they may be possible to add. If you have one:
+Use online mode only when you need it; the normal menu entry stays offline.
+Scanning works offline with the scanner's factory calibration.
 
-1. Connect it by USB and run `python3 scripts/creality.py survey` in the
-   project folder. It describes how the scanner connects (USB IDs, camera
-   formats); it changes nothing and contains no serial numbers.
-2. Paste the output into a
-   [hardware report](https://github.com/doolan-oss/crealityscan-linux-compat/issues/new?template=hardware-report.yml)
-   along with the scanner's model name.
+## Scanners
 
-Wi-Fi mode doesn't use the USB bridge, so a scanner with Wi-Fi might already
-work in Wi-Fi mode. That is untested; see Wi-Fi in [SETUP.md](docs/SETUP.md).
+Only the **Creality Pika** works over USB so far: the USB bridge implements the
+Pika's camera and control interfaces, and other scanners differ. CrealityScan also
+supports the Raptor, Otter and Ferret families. If you own one, run this and paste
+the output into a hardware report with the model name:
 
-## About the Releases page
+```sh
+python3 ~/.local/share/crealityscan-linux/app/scripts/creality.py survey
+```
 
-`helpers-v*` releases hold this project's prebuilt helper programs (the USB
-camera bridge, OpenCL fixes and diagnostics). **You don't need to download
-anything from Releases:** setup fetches and checks the right one automatically.
-Their "Source code" archives are snapshots of the commit the helpers were built
-from; install from the main branch as above.
+It only reads USB descriptions (IDs, camera formats) and contains no serial numbers.
+Wi-Fi mode doesn't use the USB bridge, so scanners with Wi-Fi may work in Wi-Fi
+mode; that is untested. See [SETUP.md](docs/SETUP.md).
 
-## Status
+## Tested systems
 
-Before security hardening, the packaged setup passed a fresh-install **USB Blue
-Laser with markers** test: live preview (approximately 110 FPS reported),
-point-cloud acquisition, mesh generation, STL export and reopening in
-CrealityScan. With the current hardened launcher and desktop display, a live USB
-scan, STL export to Documents and reopening of moved projects passed (Proton 11.0
-DXVK). With the official DXVK 3.1.1 now pinned and the CI-built helpers, live USB
-scanning worked in every mode the user tried, at about 80–90 FPS in Laser Lines
-mode on the RX 6800 XT. Other scan modes, extended
-stability and other hardware remain untested; see
-[VALIDATION.md](docs/VALIDATION.md).
+| System | GPU | Result |
+|---|---|---|
+| CachyOS, KDE Plasma | AMD RX 6800 XT (ROCm) | full scans, 80–110 FPS (original project, 4.3.2) |
+| TUXEDO OS, KDE | NVIDIA T600 laptop | setup and GPU checks (original project) |
+| Ubuntu 26.04 | Intel Arc (ARL) integrated | 4.3.3: install, GPU checks, live Pika preview and scanning, ~30 FPS |
+
+Known issues and untested areas are in [LIMITATIONS.md](docs/LIMITATIONS.md).
+Please file a
+[hardware report](https://github.com/GhVost/crealityscan-linux-wrapper/issues/new?template=hardware-report.yml)
+whether it works or not.
+
+## Install from source
+
+```sh
+git clone https://github.com/GhVost/crealityscan-linux-wrapper.git
+cd crealityscan-linux-wrapper
+python3 scripts/creality.py setup        # add --allow-untested for other versions
+```
+
+Without a `build/` folder, setup compiles the helpers, which needs
+`clang lld llvm gcc libyuv-dev libjpeg-dev opencl-c-headers` (Ubuntu names; Arch:
+`clang lld llvm gcc libyuv opencl-headers`). Keep the folder; the menu entry runs
+from it. The full manual recipe is in [SETUP.md](docs/SETUP.md).
 
 ## For developers
 
-The USB bridge supplies camera enumeration, device identity/control interfaces
-and real Linux V4L2 image/metadata transport to the Windows SDK. Scoped OpenCL
-helpers address observed blue-laser compiler and RX 6800 XT allocation issues.
-No patched vendor binary, vendor kernel source, Wine distribution, driver,
-installer, recording or user prefix is included. [SETUP.md](docs/SETUP.md) covers
-the manual recipe and building the helpers from source.
-
 ```sh
-python3 scripts/creality.py --help
+python3 scripts/creality.py build --portable   # helpers into build/
+python3 -m unittest discover -s tests          # offline tests
+python3 scripts/pack.py                        # dist/: .run, .tar.gz, SHA256SUMS
 ```
 
-Project layout:
+`pack.py` bundles the project, the built helpers and the pinned Wine and DXVK
+archives (downloaded and checksummed if needed). To add a tested CrealityScan
+version, install it with `--allow-untested`, test it with a scanner, and add its
+installer and SDK hashes to `crealityscan_tested` in
+[config/versions.lock.json](config/versions.lock.json) (newest first).
 
-- `src/usb-bridge/`: Windows Media Foundation shim and native transport helpers.
-- `src/opencl/`: opt-in, prefix-scoped compatibility and allocation fixes.
-- `src/probes/`: transparent Windows rendering/OpenCL correctness probes.
-- `scripts/`: config, build, isolated installer and launcher.
-- `config/`: public example and pinned dependency hashes; personal config stays local.
-- `tools/pika-recorder/`: [native recorder/replay](docs/NATIVE_RECORDER.md), no Wine or vendor DLLs.
-- `tests/`, `docs/`: offline checks, setup and measured limitations.
+How it works:
 
-Build products go in ignored `build/`. Installed software goes in a
-user-selected **new** data directory outside source; projects and exports go in
-the exports folder. Normal launches never recreate
-a prefix; setup refuses unowned or incompletely populated locations. Existing
-Steam/Proton installations are read-only inputs, not modified. Dependencies and
-installed executables are checked against a host-only baseline before launch.
-See [SECURITY.md](SECURITY.md) for filesystem/display isolation, Wi-Fi exceptions
-and recording-input limits. Earlier prefixes require a new installation; they
-are never migrated or rebaselined automatically.
+- `src/usb-bridge/`: Windows Media Foundation and device-enumeration bridge that
+  feeds the Pika's Linux V4L2 cameras and controls to the Windows SDK.
+- `src/usb-bridge/sdk-proxy.c` + `scripts/pe_exports.py`: a stub DLL that loads the
+  bridge, given the installed SDK's export table at install time.
+- `src/opencl/`: opt-in OpenCL fixes (blue-laser kernel for known kernel
+  fingerprints, RX 6800 XT allocation); anything unrecognised passes through.
+- `src/probes/`: Windows OpenCL/OpenGL/Media Foundation probes used by the GPU check.
+- `scripts/`: setup, sandbox, launcher, packaging. `tools/pika-recorder/`: a
+  [native recorder](docs/NATIVE_RECORDER.md) that needs no Wine.
 
-Original source is MIT-licensed; see [NOTICE.md](NOTICE.md), the
-[provenance audit](docs/PROVENANCE.md) and [third-party notices](THIRD_PARTY_NOTICES.md). Do not include local configs, logs, prefixes or recordings in issues
-or commits without reviewing their contents. No GitHub publication is automated.
+Security model, mount allowlist and network rules: [SECURITY.md](SECURITY.md).
+
+## License
+
+Original work is MIT-licensed; see [LICENSE](LICENSE), [NOTICE.md](NOTICE.md),
+the [provenance audit](docs/PROVENANCE.md) and
+[third-party notices](THIRD_PARTY_NOTICES.md). CrealityScan, the Orbbec SDK, Wine
+and DXVK keep their own licenses and are not part of this repository.

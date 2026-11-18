@@ -18,6 +18,11 @@ def download(url, sha256, folder):
     target = folder/url.rsplit('/', 1)[-1]
     if target.is_file() and digest(target) == sha256:
         return target
+    # An offline pack ships the pinned archives in the project's downloads/ folder.
+    bundled = ROOT/'downloads'/target.name
+    if bundled.is_file() and digest(bundled) == sha256:
+        print('Using bundled', bundled.name, flush=True)
+        return bundled
     print('Downloading', url, flush=True)
     h = hashlib.sha256()
     with tempfile.NamedTemporaryFile(dir=folder, prefix='.download-', delete=False) as tmp:
