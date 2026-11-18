@@ -86,7 +86,7 @@ To uninstall, run `sh crealityscan-linux-*.run --uninstall` (or
 
 | Version | Status |
 |---|---|
-| 4.3.3 | Tested: install, GPU checks, Pika detection, buttons, live preview, scanning |
+| 4.3.3 | Tested: install, GPU checks, Pika detection, buttons, live preview, scanning, calibration |
 | 4.3.2 | Tested by the original project, including full scans and STL export |
 
 A version not listed is refused, because nobody has checked it yet. To try it:
@@ -123,10 +123,8 @@ the *Wi-Fi and online mode* section of [SECURITY.md](SECURITY.md).
 
 - **One offline session:** right-click **CrealityScan** in your app menu and choose
   **Open offline (no internet access)**.
-- **Calibration doesn't work yet:** the board data downloads, but the scanner
-  resets when calibration starts and the bridge can't follow it. Calibrate on
-  Windows or with the phone app, and **decline firmware updates** in this app
-  (flashing through the bridge is untested).
+- **Calibration works** (tested once with firmware 1.1.13). **Decline firmware
+  updates** the app offers: flashing through the bridge is untested.
 - **Always offline:** set `"allow_host_network": false` in
   `~/.local/share/crealityscan-linux/app/config.local.json`. Scanning works
   offline with the scanner's factory calibration; calibration then fails.

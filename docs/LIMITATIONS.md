@@ -22,15 +22,17 @@ kernel. Treat any new version as unverified until a scan has been exported.
 each stream start, with no visible effect so far; the app's performance test
 refuses to run on battery (`OB_SCAN_ERROR_NO_PLUG_IN_POWER`, as on Windows);
 calibration needs Creality's server for board data, which the default USB
-sandbox blocked (scanning with the factory calibration works). Online USB sessions
-(now the default) download it successfully, but **calibration still fails**: when
-calibration starts the scanner re-enumerates on USB (disconnect and reconnect
-within a second, new device number), the bridge keeps the old device nodes, every
-control request then fails and the app reports `OB_SCAN_ERROR_FATAL`
-(`obscan_calib_start`). Calibrate with CrealityScan on Windows or the phone app
-until the bridge can follow a reconnect. The app also offers firmware updates when
-online (firmware 1.1.13 to 1.1.15 was offered); flashing through the bridge is
-untested and likely hits the same reconnect limit, so decline them here. Switching the scanner
+sandbox blocked. Online USB sessions (now the default) download it, and with the
+system root certificates in the sandbox **calibration succeeded** on 18 November
+2026 (Pika firmware 1.1.13: 40 poses captured, `OB_CALIB_SUCCESS`). One earlier
+attempt failed with `OB_SCAN_ERROR_FATAL` after the scanner re-enumerated on USB
+at calibration start; that attempt followed a confirmed firmware-update prompt
+(1.1.13 to 1.1.15, not actually flashed), and the successful attempt sent the same
+calibration commands without any re-enumeration. Since then a host-side device
+broker (`scripts/pika_broker.py`) lets the helpers reopen the scanner after a
+re-enumeration; it was verified against the real scanner's nodes but has not yet
+been exercised by an actual mid-session reboot. Firmware updates through the
+bridge remain untested; decline them. Switching the scanner
 off during a session makes the app crash or stop with a USB "No such device"
 error and the launcher exit with code 3; switch it on and relaunch. The notes
 below describe the 4.3.2 results.
