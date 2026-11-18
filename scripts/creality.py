@@ -124,6 +124,10 @@ def launch(c,mode,smoke=False,online=False):
     dependencies(c)
     try:lock=owned(c)
     except BlockingIOError:return running()
+    if not smoke:
+        # Checks and Unity startup take about a minute with no window; say so at once.
+        notify('Starting CrealityScan. This takes about a minute; its window will appear by itself.',
+               title='CrealityScan is starting')
     verify_install(c);log=logdir(c,'smoke'if smoke else mode);prepare_exports(c)
     e={};nodes=[];scanner_lock=None
     if mode=='usb' and not smoke:
