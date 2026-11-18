@@ -123,6 +123,10 @@ the *Wi-Fi and online mode* section of [SECURITY.md](SECURITY.md).
 
 - **One offline session:** right-click **CrealityScan** in your app menu and choose
   **Open offline (no internet access)**.
+- **Calibration doesn't work yet:** the board data downloads, but the scanner
+  resets when calibration starts and the bridge can't follow it. Calibrate on
+  Windows or with the phone app, and **decline firmware updates** in this app
+  (flashing through the bridge is untested).
 - **Always offline:** set `"allow_host_network": false` in
   `~/.local/share/crealityscan-linux/app/config.local.json`. Scanning works
   offline with the scanner's factory calibration; calibration then fails.
